@@ -2,6 +2,8 @@
 
 Minimal macOS 14+ SwiftUI app for real-time English subtitles and Turkish translation from system audio input (e.g. BlackHole) via OpenAI Realtime WebRTC.
 
+[Türkçe Kullanım Klavuzu: UsageGuide.md](UsageGuide.md)
+
 ## Preview
 
 ![App Screenshot](screenshots/ss.webp)
