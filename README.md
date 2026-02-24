@@ -6,7 +6,7 @@ Minimal macOS 14+ SwiftUI app for real-time English subtitles and Turkish transl
 
 ![App Screenshot](screenshots/ss.webp)
 
-- Demo video (MP4): [screenshots/app-video.mp4](screenshots/app-video.mp4)
+- Demo video (MP4): [Watch / Download](https://raw.githubusercontent.com/BerkCalik/RealTimeCaptionsTranslateMacOS/main/screenshots/app-video.mp4)
 
 ## Stack
 - Swift
