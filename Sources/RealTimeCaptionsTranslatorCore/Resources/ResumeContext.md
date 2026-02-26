@@ -47,10 +47,10 @@ I am a Senior Mobile and Frontend Developer with 10+ years of experience, mainly
 - Amonsis Yazilim (Full-Stack Developer, 2014-2016): RFID warehouse systems, Android field sales app, MSSQL integrations
 
 ## Skills (Interview-Focused)
-- Mobile / Frontend: React Native, React.js, Next.js
+- Mobile / Frontend: React Native, React.js, Next.js, Expo, Tailwind CSS
 - Languages: TypeScript, JavaScript, C#, Java
-- State Management: Redux Toolkit, Zustand
-- Tooling: Vite, Git, Docker, Sentry, App Center
+- State Management: Redux Toolkit, Zustand, React Context
+- Tooling: Vite, Git, Docker, Sentry, App Center, Fastlane, Eslint
 - Backend/Integration: .NET Core Web API, PostgreSQL, MSSQL
 
 ## Education (Short)
@@ -83,9 +83,9 @@ I am a Senior Mobile and Frontend Developer with 10+ years of experience, mainly
 - I am looking for a team where I can combine hands-on development with ownership.
 
 ### Why are you leaving / Why did you leave your last role?
-- Keep the tone professional and forward-looking.
-- Focus on growth, product impact, ownership, and technical challenges.
-- Avoid negative comments about people or company.
+- My last company went through downsizing, so my time there ended for business reasons.
+- I keep the explanation professional and neutral.
+- I focus on what I am looking for next: long-term impact, ownership, and strong engineering culture.
 
 ### Why should we hire you?
 - Strong React Native + React experience across multiple industries.
@@ -120,15 +120,15 @@ I am a Senior Mobile and Frontend Developer with 10+ years of experience, mainly
 ### 1) Performance Improvement in High-Traffic App (Passgage)
 - Situation: A high-traffic HR super app needed better performance and smoother user experience.
 - Task: Improve responsiveness and reduce performance pain points in a production app.
-- Action: Analyzed bottlenecks, improved implementation patterns, and focused on practical performance optimizations in the React Native codebase.
-- Result: Performance improved and the app became more stable and maintainable. (Add concrete metrics if available.)
+- Action: The project was JavaScript-heavy, poorly structured, and had no proper state management, which caused unnecessary re-renders. I led improvements by moving the codebase toward TypeScript, introducing feature-based organization, implementing Redux Toolkit for state management, and applying memoization patterns to reduce re-render issues.
+- Result: The app became more predictable, easier to maintain, and performance issues caused by unnecessary re-renders were reduced. (Add concrete metrics if available.)
 - Use for: challenge, performance, impact, debugging, prioritization
 
 ### 2) Building a Sustainable Mobile Architecture (Passgage)
 - Situation: The project needed a maintainable structure for ongoing feature development.
 - Task: Create a scalable architecture and improve release reliability.
-- Action: Introduced feature-based architecture, improved project organization, and set up CI/CD with App Center and Sentry monitoring.
-- Result: Development and release processes became more structured and easier to maintain. (Add team/product outcomes if available.)
+- Action: As the lead, I needed to protect engineering standards while the project evolved. I introduced a feature-based architecture, improved project organization, used Redux Toolkit as a standard state management approach, and strengthened code quality controls with pre-commit hooks for ESLint, SonarCloud integration, and GitHub Actions checks in PRs for ESLint and Prettier. I also supported CI/CD and monitoring practices (App Center, Sentry).
+- Result: Development standards became more consistent, code review quality improved, and the release process became more reliable and maintainable. (Add team/product outcomes if available.)
 - Use for: architecture, ownership, leadership, quality, long-term thinking
 
 ### 3) Fintech App From Scratch (Ruul)
@@ -148,7 +148,7 @@ I am a Senior Mobile and Frontend Developer with 10+ years of experience, mainly
 ### 5) Native Module Integration Challenge (Inveon)
 - Situation: E-commerce apps needed payment-related integration via Masterpass SDK.
 - Task: Integrate SDK functionality into React Native applications.
-- Action: Built React Native Native Modules and integrated them with the app architecture.
+- Action: I solved this by developing both sides of the integration: the Java Android native side for the Masterpass SDK integration and the React Native JavaScript side that consumed the native module. Then I connected the module cleanly into the app flow.
 - Result: Enabled required payment integration capabilities in production apps.
 - Use for: technical challenge, native integration, problem solving, platform knowledge
 

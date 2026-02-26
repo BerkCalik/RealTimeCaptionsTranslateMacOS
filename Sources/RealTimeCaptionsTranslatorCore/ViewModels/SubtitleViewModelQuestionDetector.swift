@@ -41,17 +41,57 @@ struct SubtitleViewModelQuestionDetector {
             return true
         }
 
-        let starters = [
+        let singleWordStarters = [
             "who", "what", "when", "where", "why", "how",
             "can", "could", "would", "should",
             "do", "does", "did",
-            "is", "are", "am", "was", "were"
+            "is", "are", "am", "was", "were",
+            "describe", "explain", "discuss", "compare",
+            "share", "tell", "walk", "talk", "give"
         ]
 
-        for starter in starters {
+        for starter in singleWordStarters {
             if normalizedText == starter || normalizedText.hasPrefix(starter + " ") {
                 return true
             }
+        }
+
+        let phraseStarters = [
+            "tell me about",
+            "tell me a little about",
+            "describe your",
+            "describe a time",
+            "describe how",
+            "explain your",
+            "explain how",
+            "walk me through",
+            "talk about",
+            "discuss your",
+            "compare your",
+            "give me an example",
+            "give an example",
+            "share a time",
+            "share an example"
+        ]
+
+        for phrase in phraseStarters {
+            if normalizedText == phrase || normalizedText.hasPrefix(phrase + " ") {
+                return true
+            }
+        }
+
+        let interviewPromptSignals = [
+            "a time when",
+            "an example of",
+            "your professional background",
+            "your background",
+            "your experience with",
+            "challenge you solved",
+            "problem you solved"
+        ]
+
+        for signal in interviewPromptSignals where normalizedText.contains(signal) {
+            return true
         }
 
         return false

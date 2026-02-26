@@ -17,6 +17,7 @@ final class SubtitleViewModel: ObservableObject {
     @Published private(set) var qaEntries: [QAEntry] = []
     @Published private(set) var qaServiceState: QAServiceState = .idle
     @Published private(set) var qaStatusText: String = "Idle"
+    @Published private(set) var qaAutoScrollToken: Int = 0
 
     @Published var fontSize: Double = 42 {
         didSet { settingsStore.setFontSize(fontSize) }
@@ -322,6 +323,28 @@ final class SubtitleViewModel: ObservableObject {
         qaEntries.removeAll()
         questionDetector.reset()
         qaStatusText = isAutoQAEnabled ? qaStatusText : "Idle"
+        bumpQAAutoScrollToken()
+    }
+
+    func copyQAEntry(id: String) {
+        guard let entry = qaEntries.first(where: { $0.id == id }) else { return }
+
+        let question = entry.question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let answer = entry.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard question.isEmpty == false || answer.isEmpty == false else {
+            qaStatusText = "Q&A item is empty"
+            return
+        }
+
+        let combined = """
+        Question:
+        \(question)
+
+        Answer:
+        \(answer.isEmpty ? "(No answer yet)" : answer)
+        """
+        systemActions.copyStringToPasteboard(combined)
+        qaStatusText = "Q&A item copied"
     }
 
     func copyEnglishText() {
@@ -483,6 +506,7 @@ final class SubtitleViewModel: ObservableObject {
                 errorMessage: nil
             )
         )
+        bumpQAAutoScrollToken()
 
         Task {
             await qaService.submit(questionID: entryID, question: normalizedQuestion)
@@ -596,14 +620,24 @@ final class SubtitleViewModel: ObservableObject {
         var entry = qaEntries[index]
         transform(&entry)
         qaEntries[index] = entry
+        bumpQAAutoScrollToken()
     }
 
     private func markPendingOrAnsweringQAsStopped() {
+        var changed = false
         for index in qaEntries.indices {
             if qaEntries[index].status == .queued || qaEntries[index].status == .answering {
                 qaEntries[index].status = .stopped
+                changed = true
             }
         }
+        if changed {
+            bumpQAAutoScrollToken()
+        }
+    }
+
+    private func bumpQAAutoScrollToken() {
+        qaAutoScrollToken &+= 1
     }
 
     private func appendDelta(_ current: String, delta: String) -> String {

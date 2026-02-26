@@ -349,21 +349,33 @@ struct SubtitleView: View {
             Divider()
                 .overlay(tokens.divider)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if viewModel.qaEntries.isEmpty {
-                        Text("Detected English questions and their automatic answers will appear here.")
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundStyle(tokens.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
-                    } else {
-                        ForEach(viewModel.qaEntries) { entry in
-                            qaEntryCard(entry)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if viewModel.qaEntries.isEmpty {
+                            Text("Detected English questions and their automatic answers will appear here.")
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(tokens.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 4)
+                        } else {
+                            ForEach(viewModel.qaEntries) { entry in
+                                qaEntryCard(entry)
+                            }
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("qa-bottom-anchor")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .onChange(of: viewModel.qaAutoScrollToken) { _, _ in
+                    guard viewModel.qaEntries.isEmpty == false else { return }
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        proxy.scrollTo("qa-bottom-anchor", anchor: .bottom)
                     }
                 }
-                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
@@ -387,6 +399,25 @@ struct SubtitleView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(tokens.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    viewModel.copyQAEntry(id: entry.id)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tokens.textSecondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(tokens.surfaceStrong.opacity(0.6))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(tokens.border, lineWidth: 1)
+                )
+                .help("Copy question and answer")
 
                 Text(entry.status.title)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
