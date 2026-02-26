@@ -6,6 +6,8 @@ struct SubtitleViewModelPersistedSettings {
     var selectedTranslationModel: TranslationModelOption?
     var selectedLatencyPreset: TranslationLatencyPreset?
     var keepTechWordsOriginal: Bool?
+    var isAutoQAEnabled: Bool?
+    var selectedQAEnglishLevel: QAEnglishLevel?
     var apiToken: String?
 }
 
@@ -19,6 +21,8 @@ struct SubtitleViewModelSettingsStore {
         case selectedTranslationModel = "settings.selectedTranslationModel"
         case selectedLatencyPreset = "settings.selectedLatencyPreset"
         case keepTechWordsOriginal = "settings.keepTechWordsOriginal"
+        case isAutoQAEnabled = "settings.isAutoQAEnabled"
+        case selectedQAEnglishLevel = "settings.selectedQAEnglishLevel"
         case apiToken = "settings.apiToken"
     }
 
@@ -42,6 +46,14 @@ struct SubtitleViewModelSettingsStore {
 
         if defaults.object(forKey: Key.keepTechWordsOriginal.rawValue) != nil {
             settings.keepTechWordsOriginal = defaults.bool(forKey: Key.keepTechWordsOriginal.rawValue)
+        }
+
+        if defaults.object(forKey: Key.isAutoQAEnabled.rawValue) != nil {
+            settings.isAutoQAEnabled = defaults.bool(forKey: Key.isAutoQAEnabled.rawValue)
+        }
+
+        if let storedLevelRaw = defaults.string(forKey: Key.selectedQAEnglishLevel.rawValue) {
+            settings.selectedQAEnglishLevel = QAEnglishLevel(rawValue: storedLevelRaw)
         }
 
         if defaults.object(forKey: Key.fontSize.rawValue) != nil {
@@ -80,6 +92,14 @@ struct SubtitleViewModelSettingsStore {
 
     func setKeepTechWordsOriginal(_ value: Bool) {
         defaults.set(value, forKey: Key.keepTechWordsOriginal.rawValue)
+    }
+
+    func setAutoQAEnabled(_ value: Bool) {
+        defaults.set(value, forKey: Key.isAutoQAEnabled.rawValue)
+    }
+
+    func setSelectedQAEnglishLevel(_ value: QAEnglishLevel) {
+        defaults.set(value.rawValue, forKey: Key.selectedQAEnglishLevel.rawValue)
     }
 
     func setAPIToken(_ value: String) {

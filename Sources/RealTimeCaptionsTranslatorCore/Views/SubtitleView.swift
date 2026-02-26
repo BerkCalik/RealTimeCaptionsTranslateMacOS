@@ -51,6 +51,7 @@ struct SubtitleView: View {
     var body: some View {
         GeometryReader { geometry in
             let layoutMode = controlLayoutMode(for: geometry.size.width)
+            let qaSideBySide = geometry.size.width >= 1540
             let subtitleMinHeight = subtitlePanelMinHeight(
                 forTotalHeight: geometry.size.height,
                 mode: layoutMode
@@ -59,18 +60,32 @@ struct SubtitleView: View {
             ZStack {
                 backgroundLayer
 
-                VStack(spacing: 14) {
-                    englishContainer(minHeight: subtitleMinHeight)
-                    translationContainer(minHeight: subtitleMinHeight)
-                    setupBanner
-                    controls(mode: layoutMode)
-                    statusStrip
+                Group {
+                    if qaSideBySide {
+                        HStack(alignment: .top, spacing: 14) {
+                            mainContent(
+                                layoutMode: layoutMode,
+                                subtitleMinHeight: subtitleMinHeight
+                            )
+                            qaPanel
+                                .frame(width: min(420, max(320, geometry.size.width * 0.28)))
+                        }
+                    } else {
+                        VStack(spacing: 14) {
+                            mainContent(
+                                layoutMode: layoutMode,
+                                subtitleMinHeight: subtitleMinHeight
+                            )
+                            qaPanel
+                        }
+                    }
                 }
                 .padding(18)
             }
             .animation(.easeInOut(duration: 0.16), value: layoutMode)
+            .animation(.easeInOut(duration: 0.16), value: qaSideBySide)
         }
-        .frame(minWidth: 980, minHeight: 720)
+        .frame(minWidth: 1120, minHeight: 720)
         .task {
             await viewModel.refreshDevicesAndSetupState()
         }
@@ -99,6 +114,18 @@ struct SubtitleView: View {
         .sheet(isPresented: $viewModel.isSetupGuidePresented) {
             SetupGuideView(viewModel: viewModel)
         }
+    }
+
+    @ViewBuilder
+    private func mainContent(layoutMode: ControlLayoutMode, subtitleMinHeight: CGFloat) -> some View {
+        VStack(spacing: 14) {
+            englishContainer(minHeight: subtitleMinHeight)
+            translationContainer(minHeight: subtitleMinHeight)
+            setupBanner
+            controls(mode: layoutMode)
+            statusStrip
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var isErrorAlertPresented: Binding<Bool> {
@@ -257,6 +284,143 @@ struct SubtitleView: View {
                 .stroke(tokens.border, lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.20), radius: 12, y: 8)
+    }
+
+    private var qaPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AUTO Q&A")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(tokens.textSecondary)
+
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(qaStatusColor)
+                            .frame(width: 7, height: 7)
+                        Text(viewModel.qaServiceStateTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(tokens.textPrimary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Button("Clear") {
+                    viewModel.clearQAHistory()
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.qaEntries.isEmpty)
+            }
+
+            Toggle("Auto-answer detected questions", isOn: $viewModel.isAutoQAEnabled)
+                .toggleStyle(.checkbox)
+                .font(.callout)
+                .foregroundStyle(tokens.textPrimary)
+                .onChange(of: viewModel.isAutoQAEnabled) { _, _ in
+                    viewModel.applyAutoQAEnabledPreference()
+                }
+
+            HStack(spacing: 8) {
+                Text("Answer English Level")
+                    .font(.caption)
+                    .foregroundStyle(tokens.textSecondary)
+                Spacer(minLength: 0)
+                Picker("Answer English Level", selection: $viewModel.selectedQAEnglishLevel) {
+                    ForEach(QAEnglishLevel.allCases) { level in
+                        Text(level.title).tag(level)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 92)
+                .onChange(of: viewModel.selectedQAEnglishLevel) { _, _ in
+                    viewModel.applyQAEnglishLevelPreference()
+                }
+            }
+
+            Text(viewModel.qaStatusText)
+                .font(.caption)
+                .foregroundStyle(tokens.textSecondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
+                .overlay(tokens.divider)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if viewModel.qaEntries.isEmpty {
+                        Text("Detected English questions and their automatic answers will appear here.")
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundStyle(tokens.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                    } else {
+                        ForEach(viewModel.qaEntries) { entry in
+                            qaEntryCard(entry)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(tokens.surfaceStrong)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(tokens.border, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.20), radius: 12, y: 8)
+    }
+
+    private func qaEntryCard(_ entry: QAEntry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(entry.question)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(tokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(entry.status.title)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(statusForeground(for: entry.status))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(statusBackground(for: entry.status))
+                    )
+            }
+
+            Text(entry.answer.isEmpty ? "Waiting for answer..." : entry.answer)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(entry.answer.isEmpty ? tokens.textSecondary : tokens.textPrimary)
+                .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let errorMessage = entry.errorMessage, errorMessage.isEmpty == false {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(tokens.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(tokens.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(tokens.border, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -542,6 +706,49 @@ struct SubtitleView: View {
             return tokens.accent
         case .error:
             return tokens.danger
+        }
+    }
+
+    private var qaStatusColor: Color {
+        switch viewModel.qaServiceState {
+        case .idle:
+            return tokens.textSecondary
+        case .connecting:
+            return tokens.highlight
+        case .ready:
+            return tokens.accent
+        case .error:
+            return tokens.danger
+        }
+    }
+
+    private func statusBackground(for status: QAEntryStatus) -> Color {
+        switch status {
+        case .queued:
+            return tokens.highlight.opacity(0.22)
+        case .answering:
+            return tokens.accent.opacity(0.20)
+        case .done:
+            return tokens.highlight.opacity(0.18)
+        case .failed:
+            return tokens.danger.opacity(0.20)
+        case .stopped:
+            return tokens.textSecondary.opacity(0.16)
+        }
+    }
+
+    private func statusForeground(for status: QAEntryStatus) -> Color {
+        switch status {
+        case .queued:
+            return tokens.highlight
+        case .answering:
+            return tokens.accent
+        case .done:
+            return tokens.highlight
+        case .failed:
+            return tokens.danger
+        case .stopped:
+            return tokens.textSecondary
         }
     }
 

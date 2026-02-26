@@ -8,10 +8,12 @@ public final class RealTimeCaptionsTranslatorApplicationDelegate: NSObject, NSAp
     private lazy var subtitleViewModel: SubtitleViewModel = {
         let audioService = AudioCaptureService()
         let realtimeService = RealtimeWebRTCService()
+        let qaService = RealtimeQuestionAnswerService()
 
         return SubtitleViewModel(
             audioService: audioService,
-            realtimeService: realtimeService
+            realtimeService: realtimeService,
+            qaService: qaService
         )
     }()
 

@@ -327,9 +327,11 @@ final class SubtitleViewModelTranslationTests: XCTestCase {
         let settingsStore = makeSettingsStore()
         let apiTokenStore = InMemoryAPITokenStore()
         let realtimeService = MockRealtimeService(events: [])
+        let qaService = MockQuestionAnswerService()
         let viewModel = SubtitleViewModel(
             audioService: MockAudioCaptureService(),
             realtimeService: realtimeService,
+            qaService: qaService,
             settingsStore: settingsStore,
             apiTokenStore: apiTokenStore,
             microphonePermissionProvider: { true }
@@ -341,10 +343,96 @@ final class SubtitleViewModelTranslationTests: XCTestCase {
         await waitUntilAsync {
             await realtimeService.lastAPIToken == "sk-test-token"
         }
+        await waitUntilAsync {
+            await qaService.lastAPIToken == "sk-test-token"
+        }
 
         XCTAssertEqual(apiTokenStore.loadToken(), "sk-test-token")
         XCTAssertNil(settingsStore.string(forKey: "settings.apiToken"))
         XCTAssertEqual(viewModel.statusText, "API token saved")
+    }
+
+    @MainActor
+    func testAutoQASubmitsDetectedQuestionOnEnglishFinal() async {
+        let settingsStore = makeSettingsStore()
+        let realtimeService = MockRealtimeService(events: [
+            .englishFinal(itemID: "i1", text: "What is your experience with Swift?")
+        ])
+        let qaService = MockQuestionAnswerService()
+        let viewModel = SubtitleViewModel(
+            audioService: MockAudioCaptureService(),
+            realtimeService: realtimeService,
+            qaService: qaService,
+            settingsStore: settingsStore,
+            microphonePermissionProvider: { true }
+        )
+
+        viewModel.apiToken = "sk-test"
+        viewModel.isAutoQAEnabled = true
+        viewModel.start()
+
+        await waitUntilAsync {
+            await qaService.submittedQuestions.count == 1
+        }
+
+        let submitted = await qaService.submittedQuestions
+        XCTAssertEqual(submitted.count, 1)
+        XCTAssertTrue(submitted[0].question.localizedCaseInsensitiveContains("experience with swift"))
+        XCTAssertEqual(viewModel.qaEntries.count, 1)
+        XCTAssertTrue([QAEntryStatus.queued, .stopped].contains(viewModel.qaEntries[0].status))
+    }
+
+    @MainActor
+    func testAutoQADoesNotSubmitWhenDisabled() async {
+        let settingsStore = makeSettingsStore()
+        let realtimeService = MockRealtimeService(events: [
+            .englishFinal(itemID: "i1", text: "Can you describe your background")
+        ])
+        let qaService = MockQuestionAnswerService()
+        let viewModel = SubtitleViewModel(
+            audioService: MockAudioCaptureService(),
+            realtimeService: realtimeService,
+            qaService: qaService,
+            settingsStore: settingsStore,
+            microphonePermissionProvider: { true }
+        )
+
+        viewModel.apiToken = "sk-test"
+        viewModel.start()
+        await waitUntil { viewModel.subtitleLines.isEmpty == false }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let submitted = await qaService.submittedQuestions
+        XCTAssertTrue(submitted.isEmpty)
+        XCTAssertTrue(viewModel.qaEntries.isEmpty)
+    }
+
+    @MainActor
+    func testAutoQAStreamingEventsUpdateHistoryEntry() async {
+        let settingsStore = makeSettingsStore()
+        let realtimeService = MockRealtimeService(events: [
+            .englishFinal(itemID: "i1", text: "How do you approach debugging?")
+        ])
+        let qaService = MockQuestionAnswerService(autoRespondOnSubmit: true)
+        let viewModel = SubtitleViewModel(
+            audioService: MockAudioCaptureService(),
+            realtimeService: realtimeService,
+            qaService: qaService,
+            settingsStore: settingsStore,
+            microphonePermissionProvider: { true }
+        )
+
+        viewModel.apiToken = "sk-test"
+        viewModel.isAutoQAEnabled = true
+        viewModel.start()
+
+        await waitUntil {
+            viewModel.qaEntries.first?.status == .done &&
+            (viewModel.qaEntries.first?.answer.isEmpty == false)
+        }
+
+        XCTAssertEqual(viewModel.qaEntries.first?.status, .done)
+        XCTAssertTrue((viewModel.qaEntries.first?.answer ?? "").localizedCaseInsensitiveContains("debugging"))
     }
 
     @MainActor
@@ -355,6 +443,7 @@ final class SubtitleViewModelTranslationTests: XCTestCase {
         settingsStore.set(TranslationModelOption.realtime.rawValue, forKey: "settings.selectedTranslationModel")
         settingsStore.set(TranslationLatencyPreset.ultraFast.rawValue, forKey: "settings.selectedLatencyPreset")
         settingsStore.set(false, forKey: "settings.keepTechWordsOriginal")
+        settingsStore.set(QAEnglishLevel.a2.rawValue, forKey: "settings.selectedQAEnglishLevel")
         apiTokenStore.saveToken("sk-restored")
 
         let realtimeService = MockRealtimeService(events: [])
@@ -370,6 +459,7 @@ final class SubtitleViewModelTranslationTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedTranslationModel, .realtime)
         XCTAssertEqual(viewModel.selectedLatencyPreset, .ultraFast)
         XCTAssertFalse(viewModel.keepTechWordsOriginal)
+        XCTAssertEqual(viewModel.selectedQAEnglishLevel, .a2)
         XCTAssertEqual(viewModel.apiToken, "sk-restored")
 
         await waitUntilAsync {
@@ -498,5 +588,55 @@ private actor MockRealtimeService: RealtimeSpeechTranslationServicing {
 
     func setAPIToken(_ token: String) async {
         lastAPIToken = token
+    }
+}
+
+private actor MockQuestionAnswerService: RealtimeQuestionAnswerServicing {
+    struct SubmittedQuestion: Equatable {
+        let id: String
+        let question: String
+    }
+
+    private let autoRespondOnSubmit: Bool
+    private var continuation: AsyncThrowingStream<QAEvent, Error>.Continuation?
+    private(set) var submittedQuestions: [SubmittedQuestion] = []
+    private(set) var lastAPIToken: String?
+    private(set) var lastAnswerEnglishLevel: QAEnglishLevel?
+
+    init(autoRespondOnSubmit: Bool = false) {
+        self.autoRespondOnSubmit = autoRespondOnSubmit
+    }
+
+    func startSession(apiToken _: String) async throws -> AsyncThrowingStream<QAEvent, Error> {
+        AsyncThrowingStream { continuation in
+            self.continuation = continuation
+            continuation.yield(.serviceState(.ready))
+            continuation.yield(.status("Auto Q&A ready"))
+        }
+    }
+
+    func stopSession() async {
+        continuation?.finish()
+        continuation = nil
+    }
+
+    func submit(questionID: String, question: String) async {
+        submittedQuestions.append(.init(id: questionID, question: question))
+
+        guard autoRespondOnSubmit else { return }
+        continuation?.yield(.responseStarted(questionID: questionID))
+        continuation?.yield(.answerDelta(questionID: questionID, text: "I approach debugging systematically. "))
+        continuation?.yield(.answerDelta(questionID: questionID, text: "I start by reproducing the issue and narrowing scope."))
+        continuation?.yield(.answerCompleted(questionID: questionID))
+    }
+
+    func cancelActiveResponse() async {}
+
+    func setAPIToken(_ token: String) async {
+        lastAPIToken = token
+    }
+
+    func setAnswerEnglishLevel(_ level: QAEnglishLevel) async {
+        lastAnswerEnglishLevel = level
     }
 }

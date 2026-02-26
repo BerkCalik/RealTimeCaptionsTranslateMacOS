@@ -14,6 +14,10 @@ final class SubtitleViewModel: ObservableObject {
     @Published private(set) var subtitle: SubtitlePayload = .empty
     @Published private(set) var subtitleLines: [String] = []
     @Published private(set) var translatedLines: [String] = []
+    @Published private(set) var qaEntries: [QAEntry] = []
+    @Published private(set) var qaServiceState: QAServiceState = .idle
+    @Published private(set) var qaStatusText: String = "Idle"
+
     @Published var fontSize: Double = 42 {
         didSet { settingsStore.setFontSize(fontSize) }
     }
@@ -25,6 +29,12 @@ final class SubtitleViewModel: ObservableObject {
     }
     @Published var keepTechWordsOriginal: Bool = true {
         didSet { settingsStore.setKeepTechWordsOriginal(keepTechWordsOriginal) }
+    }
+    @Published var isAutoQAEnabled: Bool = false {
+        didSet { settingsStore.setAutoQAEnabled(isAutoQAEnabled) }
+    }
+    @Published var selectedQAEnglishLevel: QAEnglishLevel = .b1 {
+        didSet { settingsStore.setSelectedQAEnglishLevel(selectedQAEnglishLevel) }
     }
     @Published var apiToken: String = "" {
         didSet { settingsStore.setAPIToken(apiToken) }
@@ -42,12 +52,17 @@ final class SubtitleViewModel: ObservableObject {
 
     private let audioService: AudioCaptureServicing
     private let realtimeService: RealtimeSpeechTranslationServicing
+    private let qaService: any RealtimeQuestionAnswerServicing
     private let microphonePermissionProvider: @Sendable () async -> Bool
     private let settingsStore: SubtitleViewModelSettingsStore
     private let systemActions: SubtitleViewModelSystemActions
 
     private var streamingTask: Task<Void, Never>?
+    private var qaStreamingTask: Task<Void, Never>?
     private var captionReducer = SubtitleViewModelCaptionReducer()
+    private var questionDetector = SubtitleViewModelQuestionDetector()
+    private var qaEntryCounter = 0
+
     private static let blackHoleDownloadURL = URL(string: "https://existential.audio/blackhole/")!
     private static let soundInputSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.sound?input")!
 
@@ -58,9 +73,23 @@ final class SubtitleViewModel: ObservableObject {
         return false
     }
 
+    var qaServiceStateTitle: String {
+        switch qaServiceState {
+        case .idle:
+            return "Idle"
+        case .connecting:
+            return "Connecting"
+        case .ready:
+            return "Ready"
+        case .error:
+            return "Error"
+        }
+    }
+
     init(
         audioService: AudioCaptureServicing,
         realtimeService: RealtimeSpeechTranslationServicing,
+        qaService: any RealtimeQuestionAnswerServicing = NoOpRealtimeQuestionAnswerService(),
         settingsStore: UserDefaults = .standard,
         systemActions: SubtitleViewModelSystemActions = .init(),
         apiTokenStore: any APITokenStoring = KeychainAPITokenStore(),
@@ -74,6 +103,7 @@ final class SubtitleViewModel: ObservableObject {
     ) {
         self.audioService = audioService
         self.realtimeService = realtimeService
+        self.qaService = qaService
         self.settingsStore = SubtitleViewModelSettingsStore(defaults: settingsStore, tokenStore: apiTokenStore)
         self.systemActions = systemActions
         self.microphonePermissionProvider = microphonePermissionProvider
@@ -83,6 +113,8 @@ final class SubtitleViewModel: ObservableObject {
 
         Task { [apiToken] in
             await realtimeService.setAPIToken(apiToken)
+            await qaService.setAPIToken(apiToken)
+            await qaService.setAnswerEnglishLevel(selectedQAEnglishLevel)
         }
     }
 
@@ -224,6 +256,7 @@ final class SubtitleViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.realtimeService.setAPIToken(currentToken)
+            await self.qaService.setAPIToken(currentToken)
 
             if currentToken.isEmpty {
                 self.statusText = "API token cleared"
@@ -251,9 +284,44 @@ final class SubtitleViewModel: ObservableObject {
         }
     }
 
+    func applyAutoQAEnabledPreference() {
+        let enabled = isAutoQAEnabled
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if enabled {
+                if self.isListening {
+                    await self.startQASessionIfNeeded()
+                } else {
+                    self.qaServiceState = .idle
+                    self.qaStatusText = "Auto Q&A enabled (starts when listening)"
+                }
+            } else {
+                await self.qaService.cancelActiveResponse()
+                await self.stopQASession(markActiveEntriesStopped: true, statusText: "Auto Q&A disabled")
+            }
+        }
+    }
+
+    func applyQAEnglishLevelPreference() {
+        let level = selectedQAEnglishLevel
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.qaService.setAnswerEnglishLevel(level)
+            self.qaStatusText = "Auto Q&A answer level: \(level.title)"
+        }
+    }
+
     func clearSubtitles() {
         captionReducer.clearAll()
         syncCaptionOutputs()
+        questionDetector.reset()
+    }
+
+    func clearQAHistory() {
+        qaEntries.removeAll()
+        questionDetector.reset()
+        qaStatusText = isAutoQAEnabled ? qaStatusText : "Idle"
     }
 
     func copyEnglishText() {
@@ -286,6 +354,7 @@ final class SubtitleViewModel: ObservableObject {
             }
 
             captionReducer.resetTurkishFinalDeduplication()
+            questionDetector.reset()
             try await SubtitleViewModelSessionPreparation.configureRealtimeService(
                 realtimeService,
                 apiToken: apiToken,
@@ -301,6 +370,13 @@ final class SubtitleViewModel: ObservableObject {
 
             state = .listening
             statusText = "Listening (Realtime)"
+
+            if isAutoQAEnabled {
+                await startQASessionIfNeeded()
+            } else {
+                qaServiceState = .idle
+                qaStatusText = "Auto Q&A disabled"
+            }
 
             for try await event in eventStream {
                 if Task.isCancelled { break }
@@ -321,6 +397,7 @@ final class SubtitleViewModel: ObservableObject {
         }
 
         await realtimeService.stopSession()
+        await stopQASession(markActiveEntriesStopped: true, statusText: isAutoQAEnabled ? "Idle" : "Auto Q&A disabled")
         captionReducer.resetTurkishFinalDeduplication()
         streamingTask = nil
 
@@ -340,7 +417,10 @@ final class SubtitleViewModel: ObservableObject {
         runningTask?.cancel()
 
         await realtimeService.stopSession()
+        await qaService.cancelActiveResponse()
+        await stopQASession(markActiveEntriesStopped: true, statusText: isAutoQAEnabled ? "Idle" : "Auto Q&A disabled")
         captionReducer.resetTurkishFinalDeduplication()
+        questionDetector.reset()
 
         state = .idle
         statusText = status
@@ -355,6 +435,7 @@ final class SubtitleViewModel: ObservableObject {
         case .englishFinal(let itemID, let text):
             captionReducer.handleEnglishFinal(itemID: itemID, text: text)
             syncCaptionOutputs()
+            handleAutoQAIfNeeded(itemID: itemID, text: text)
 
         case .turkishDelta(let responseID, let text):
             captionReducer.handleTurkishDelta(responseID: responseID, text: text)
@@ -377,6 +458,162 @@ final class SubtitleViewModel: ObservableObject {
         case .status(let message):
             statusText = message
         }
+    }
+
+    private func handleAutoQAIfNeeded(itemID: String, text: String) {
+        guard isAutoQAEnabled else { return }
+        guard qaStreamingTask != nil else { return }
+        guard questionDetector.shouldTrigger(itemID: itemID, text: text) else { return }
+
+        let normalizedQuestion = text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedQuestion.isEmpty == false else { return }
+
+        qaEntryCounter += 1
+        let entryID = "qa-\(qaEntryCounter)"
+        qaEntries.append(
+            QAEntry(
+                id: entryID,
+                sourceItemID: itemID,
+                question: normalizedQuestion,
+                answer: "",
+                status: .queued,
+                createdAt: Date(),
+                errorMessage: nil
+            )
+        )
+
+        Task {
+            await qaService.submit(questionID: entryID, question: normalizedQuestion)
+        }
+    }
+
+    private func startQASessionIfNeeded() async {
+        guard isListening else { return }
+        guard isAutoQAEnabled else { return }
+        guard qaStreamingTask == nil else { return }
+
+        qaServiceState = .connecting
+        qaStatusText = "Auto Q&A connecting..."
+
+        do {
+            await qaService.setAnswerEnglishLevel(selectedQAEnglishLevel)
+            let stream = try await qaService.startSession(apiToken: apiToken)
+
+            qaStreamingTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+
+                do {
+                    for try await event in stream {
+                        if Task.isCancelled { break }
+                        self.processQAEvent(event)
+                    }
+
+                    if Task.isCancelled == false,
+                       self.isAutoQAEnabled,
+                       self.isListening {
+                        self.qaServiceState = .error
+                        self.qaStatusText = "Auto Q&A disconnected"
+                    }
+                } catch is CancellationError {
+                    // no-op
+                } catch {
+                    if self.isAutoQAEnabled {
+                        self.qaServiceState = .error
+                        self.qaStatusText = "Auto Q&A failed: \(error.localizedDescription)"
+                    }
+                }
+
+                self.qaStreamingTask = nil
+            }
+        } catch {
+            qaServiceState = .error
+            qaStatusText = "Auto Q&A failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func stopQASession(markActiveEntriesStopped: Bool, statusText newStatusText: String) async {
+        let runningTask = qaStreamingTask
+        qaStreamingTask = nil
+        runningTask?.cancel()
+
+        await qaService.stopSession()
+
+        if markActiveEntriesStopped {
+            markPendingOrAnsweringQAsStopped()
+        }
+
+        qaServiceState = .idle
+        qaStatusText = newStatusText
+    }
+
+    private func processQAEvent(_ event: QAEvent) {
+        switch event {
+        case .serviceState(let state):
+            qaServiceState = state
+            if state == .idle {
+                qaStatusText = "Idle"
+            }
+
+        case .status(let message):
+            qaStatusText = message
+            if message.localizedCaseInsensitiveContains("error") {
+                qaServiceState = .error
+            }
+
+        case .responseStarted(let questionID):
+            updateQAEntry(id: questionID) { entry in
+                entry.status = .answering
+                entry.errorMessage = nil
+            }
+
+        case .answerDelta(let questionID, let text):
+            updateQAEntry(id: questionID) { entry in
+                entry.status = .answering
+                entry.answer = appendDelta(entry.answer, delta: text)
+            }
+
+        case .answerCompleted(let questionID):
+            updateQAEntry(id: questionID) { entry in
+                if entry.status != .stopped {
+                    entry.status = .done
+                }
+            }
+
+        case .responseFailed(let questionID, let message):
+            updateQAEntry(id: questionID) { entry in
+                if entry.status != .stopped {
+                    entry.status = .failed
+                    entry.errorMessage = message
+                }
+            }
+        }
+    }
+
+    private func updateQAEntry(id: String, transform: (inout QAEntry) -> Void) {
+        guard let index = qaEntries.firstIndex(where: { $0.id == id }) else { return }
+        var entry = qaEntries[index]
+        transform(&entry)
+        qaEntries[index] = entry
+    }
+
+    private func markPendingOrAnsweringQAsStopped() {
+        for index in qaEntries.indices {
+            if qaEntries[index].status == .queued || qaEntries[index].status == .answering {
+                qaEntries[index].status = .stopped
+            }
+        }
+    }
+
+    private func appendDelta(_ current: String, delta: String) -> String {
+        if current.hasSuffix(delta) {
+            return current
+        }
+        if delta.hasPrefix(current), delta.count > current.count {
+            return delta
+        }
+        return current + delta
     }
 
     private func syncCaptionOutputs() {
@@ -425,6 +662,12 @@ final class SubtitleViewModel: ObservableObject {
         }
         if let value = persisted.keepTechWordsOriginal {
             keepTechWordsOriginal = value
+        }
+        if let value = persisted.isAutoQAEnabled {
+            isAutoQAEnabled = value
+        }
+        if let value = persisted.selectedQAEnglishLevel {
+            selectedQAEnglishLevel = value
         }
         if let value = persisted.fontSize {
             fontSize = value

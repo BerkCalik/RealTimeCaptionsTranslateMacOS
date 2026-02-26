@@ -18,7 +18,10 @@ let package = Package(
             dependencies: [
                 .product(name: "WebRTC", package: "WebRTC")
             ],
-            path: "Sources/RealTimeCaptionsTranslatorCore"
+            path: "Sources/RealTimeCaptionsTranslatorCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "RealTimeCaptionsTranslatorTests",

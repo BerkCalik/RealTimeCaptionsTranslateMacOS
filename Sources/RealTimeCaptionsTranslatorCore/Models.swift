@@ -111,6 +111,68 @@ enum SubtitleState: Equatable {
     case error(String)
 }
 
+enum QAEntryStatus: Equatable {
+    case queued
+    case answering
+    case done
+    case failed
+    case stopped
+
+    var title: String {
+        switch self {
+        case .queued:
+            return "Queued"
+        case .answering:
+            return "Answering"
+        case .done:
+            return "Done"
+        case .failed:
+            return "Failed"
+        case .stopped:
+            return "Stopped"
+        }
+    }
+}
+
+struct QAEntry: Identifiable, Equatable {
+    let id: String
+    let sourceItemID: String
+    let question: String
+    var answer: String
+    var status: QAEntryStatus
+    let createdAt: Date
+    var errorMessage: String?
+}
+
+enum QAServiceState: Equatable {
+    case idle
+    case connecting
+    case ready
+    case error
+}
+
+enum QAEnglishLevel: String, CaseIterable, Identifiable {
+    case a1 = "A1"
+    case a2 = "A2"
+    case b1 = "B1"
+    case b2 = "B2"
+    case c1 = "C1"
+    case c2 = "C2"
+
+    var id: String { rawValue }
+
+    var title: String { rawValue }
+}
+
+enum QAEvent: Equatable {
+    case serviceState(QAServiceState)
+    case status(String)
+    case responseStarted(questionID: String)
+    case answerDelta(questionID: String, text: String)
+    case answerCompleted(questionID: String)
+    case responseFailed(questionID: String, message: String)
+}
+
 enum TranslationLatencyPreset: String, CaseIterable, Identifiable {
     case stable
     case balanced

@@ -35,3 +35,12 @@ protocol RealtimeSpeechTranslationServicing {
     func setLatencyPreset(_ preset: TranslationLatencyPreset) async
     func setAPIToken(_ token: String) async
 }
+
+protocol RealtimeQuestionAnswerServicing {
+    func startSession(apiToken: String) async throws -> AsyncThrowingStream<QAEvent, Error>
+    func stopSession() async
+    func submit(questionID: String, question: String) async
+    func cancelActiveResponse() async
+    func setAPIToken(_ token: String) async
+    func setAnswerEnglishLevel(_ level: QAEnglishLevel) async
+}
